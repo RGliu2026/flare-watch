@@ -1,33 +1,418 @@
-// OSL -> PEK Fare Watch — offline cache
-const CACHE = "farewatch-v1";
-const ASSETS = [
-  "./",
-  "./index.html",
-  "./manifest.webmanifest",
-  "./icons/icon-192.png",
-  "./icons/icon-512.png",
-  "./icons/icon-180.png",
-  "./icons/favicon.png"
-];
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E1A2B">
+<title>OSL → PEK Fare Watch</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/favicon.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+  :root{
+    --navy:#0E1A2B; --panel:#16263C; --panel2:#1D3149;
+    --amber:#FFB300; --green:#3DD68C; --red:#FF6B6B;
+    --ink:#EAF1F8; --muted:#8FA3BC; --line:#243A56;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono","Roboto Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--navy);color:var(--ink);font-family:var(--sans)}
+  body{
+    max-width:520px;margin:0 auto;min-height:100vh;
+    padding:calc(env(safe-area-inset-top) + 14px) 16px calc(env(safe-area-inset-bottom) + 28px);
+    -webkit-tap-highlight-color:transparent;
+  }
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted)}
 
-self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
-  self.skipWaiting();
-});
+  /* boarding-pass header */
+  .pass{
+    background:linear-gradient(160deg,var(--panel2),var(--panel));
+    border:1px solid var(--line);border-radius:18px;padding:16px 18px;position:relative;overflow:hidden;
+  }
+  .route{display:flex;align-items:center;gap:12px;margin-top:8px}
+  .iata{font-family:var(--mono);font-weight:700;font-size:34px;letter-spacing:.04em;line-height:1}
+  .cities{display:flex;justify-content:space-between;margin-top:6px}
+  .cities span{font-size:12px;color:var(--muted)}
+  .path{flex:1;position:relative;height:24px}
+  .path svg{width:100%;height:100%;display:block;overflow:visible}
+  .dash{stroke:var(--amber);stroke-width:2.5;stroke-dasharray:2 6;stroke-linecap:round;fill:none}
 
-self.addEventListener("activate", (e) => {
-  e.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
-    )
-  );
-  self.clients.claim();
-});
+  /* hero fare */
+  .hero{margin-top:16px;text-align:center;padding:22px 16px 20px;
+    background:var(--panel);border:1px solid var(--line);border-radius:18px}
+  .hero .label{display:flex;justify-content:center;gap:10px;align-items:center}
+  .fare{font-family:var(--mono);font-weight:700;font-size:54px;letter-spacing:.02em;margin-top:6px;
+    font-variant-numeric:tabular-nums;line-height:1}
+  .fare .unit{font-size:22px;color:var(--muted);margin-left:6px}
+  .fare.good{color:var(--green)}
+  .fare.over{color:var(--amber)}
+  .fare.none{color:var(--muted);font-size:26px}
+  .sub{margin-top:10px;font-size:13px;color:var(--muted)}
+  .badge{display:inline-block;font-family:var(--mono);font-size:11px;letter-spacing:.12em;
+    padding:5px 10px;border-radius:999px;text-transform:uppercase;margin-top:12px}
+  .badge.good{background:rgba(61,214,140,.14);color:var(--green);border:1px solid rgba(61,214,140,.35)}
+  .badge.over{background:rgba(255,179,0,.12);color:var(--amber);border:1px solid rgba(255,179,0,.3)}
 
-// cache-first for app shell, fall back to network
-self.addEventListener("fetch", (e) => {
-  if (e.request.method !== "GET") return;
-  e.respondWith(
-    caches.match(e.request).then((hit) => hit || fetch(e.request))
-  );
-});
+  /* section cards */
+  .card{margin-top:16px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px}
+  .card h2{font-size:13px;font-weight:600;letter-spacing:.02em;margin-bottom:2px}
+  .card .hint{font-size:12px;color:var(--muted);margin-bottom:12px}
+
+  /* chart */
+  .chartwrap{position:relative;width:100%}
+  .chartwrap svg{width:100%;height:210px;display:block;overflow:visible}
+  .empty{color:var(--muted);font-size:13px;text-align:center;padding:34px 8px;font-family:var(--mono)}
+
+  /* controls */
+  .row{display:flex;gap:10px;align-items:center}
+  .row + .row{margin-top:10px}
+  label.fld{flex:1;display:flex;flex-direction:column;gap:6px}
+  label.fld .k{font-size:11px;color:var(--muted);font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase}
+  input,select{
+    width:100%;background:var(--navy);border:1px solid var(--line);border-radius:10px;
+    color:var(--ink);font-family:var(--mono);font-size:16px;padding:11px 12px;outline:none;
+  }
+  input:focus,select:focus{border-color:var(--amber)}
+  button{
+    font-family:var(--sans);font-weight:600;font-size:15px;border:none;border-radius:11px;
+    padding:12px 16px;cursor:pointer;transition:transform .05s ease,filter .15s ease;
+  }
+  button:active{transform:translateY(1px)}
+  .btn-amber{background:var(--amber);color:#241a00}
+  .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
+  .btn-ghost:active{filter:brightness(1.3)}
+  .btn-full{width:100%}
+
+  /* log */
+  .log{list-style:none;margin-top:4px}
+  .log li{display:flex;align-items:center;gap:10px;padding:11px 4px;border-top:1px solid var(--line)}
+  .log li:first-child{border-top:none}
+  .log .d{font-family:var(--mono);font-size:13px;color:var(--muted);min-width:82px}
+  .log .p{font-family:var(--mono);font-weight:700;font-size:16px;font-variant-numeric:tabular-nums}
+  .log .p.good{color:var(--green)} .log .p.over{color:var(--ink)}
+  .log .n{flex:1;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .log .del{margin-left:auto;background:none;border:none;color:var(--muted);font-size:18px;padding:4px 8px;cursor:pointer}
+  .log .del:active{color:var(--red)}
+
+  .foot{margin-top:22px;text-align:center;font-size:11px;color:var(--muted);font-family:var(--mono);line-height:1.7}
+  .foot a{color:var(--amber);text-decoration:none}
+  .toolbar{display:flex;gap:10px;margin-top:12px}
+  .toolbar button{flex:1}
+  .installbar{margin-top:14px;display:none}
+  @media (prefers-reduced-motion:no-preference){
+    .fare{transition:color .3s ease}
+  }
+</style>
+</head>
+<body>
+
+  <!-- Boarding-pass header -->
+  <div class="pass">
+    <div class="eyebrow">Fare Watch · Round-trip</div>
+    <div class="route">
+      <div>
+        <div class="iata">OSL</div>
+      </div>
+      <div class="path" aria-hidden="true">
+        <svg viewBox="0 0 100 24" preserveAspectRatio="none">
+          <path class="dash" d="M2,20 Q40,-6 98,6"/>
+        </svg>
+      </div>
+      <div style="text-align:right">
+        <div class="iata">PEK</div>
+      </div>
+    </div>
+    <div class="cities"><span>Oslo Gardermoen</span><span>Beijing Capital</span></div>
+  </div>
+
+  <!-- Hero fare -->
+  <div class="hero">
+    <div class="label eyebrow">Lowest logged fare</div>
+    <div id="fare" class="fare none">— <span class="unit"></span></div>
+    <div id="sub" class="sub">No fares logged yet</div>
+    <div id="badge" style="display:none"></div>
+  </div>
+
+  <!-- Watch settings -->
+  <div class="card">
+    <h2>Your deal rule</h2>
+    <p class="hint">Alert-worthy when a round-trip fare drops below your target.</p>
+    <div class="row">
+      <label class="fld"><span class="k">Target (kr)</span>
+        <input id="threshold" type="number" inputmode="numeric" min="0" step="100" value="6000"></label>
+      <label class="fld"><span class="k">Travel from</span>
+        <input id="depFrom" type="date"></label>
+      <label class="fld"><span class="k">Travel to</span>
+        <input id="depTo" type="date"></label>
+    </div>
+  </div>
+
+  <!-- Chart -->
+  <div class="card">
+    <h2>Price path</h2>
+    <p class="hint">Each fare you log, drawn against your target line. Green zone = deal.</p>
+    <div class="chartwrap">
+      <svg id="chart" viewBox="0 0 340 210" preserveAspectRatio="none" aria-label="Price history"></svg>
+      <div id="chartEmpty" class="empty">Log a fare below to start the path ✈</div>
+    </div>
+  </div>
+
+  <!-- Log a fare -->
+  <div class="card">
+    <h2>Log a fare</h2>
+    <p class="hint">Check Momondo or an airline, then record the best round-trip you see.</p>
+    <div class="row">
+      <label class="fld"><span class="k">Date seen</span>
+        <input id="entryDate" type="date"></label>
+      <label class="fld"><span class="k">Price (kr)</span>
+        <input id="entryPrice" type="number" inputmode="numeric" min="0" step="50" placeholder="e.g. 6450"></label>
+    </div>
+    <div class="row">
+      <label class="fld"><span class="k">Note (airline, stops…)</span>
+        <input id="entryNote" type="text" placeholder="e.g. Finnair, 1 stop HEL"></label>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn-amber btn-full" id="addBtn">Add to price path</button>
+    </div>
+  </div>
+
+  <!-- Log list -->
+  <div class="card">
+    <h2>Logged fares</h2>
+    <p class="hint">Newest first. Tap ✕ to remove.</p>
+    <ul id="log" class="log"></ul>
+    <div class="toolbar">
+      <button class="btn-ghost" id="exportBtn">Export data</button>
+      <button class="btn-ghost" id="importBtn">Import data</button>
+    </div>
+    <input id="importFile" type="file" accept="application/json" style="display:none">
+  </div>
+
+  <div class="installbar" id="installbar">
+    <button class="btn-amber btn-full" id="installBtn">Add to home screen</button>
+  </div>
+
+  <div class="foot">
+    Data lives only on this device.<br>
+    Set the same route on <a href="https://www.momondo.no" target="_blank" rel="noopener">momondo.no</a>
+    and log the best fares you find here.
+  </div>
+
+<script>
+(function(){
+  "use strict";
+  var KEY = "oslpek.v1";
+  var state = load();
+
+  function load(){
+    try{
+      var raw = localStorage.getItem(KEY);
+      if(raw) return JSON.parse(raw);
+    }catch(e){}
+    return { threshold:6000, depFrom:"", depTo:"", entries:[] };
+  }
+  function save(){
+    try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}
+  }
+
+  var $ = function(id){ return document.getElementById(id); };
+  function fmt(n){ return Math.round(n).toLocaleString("nb-NO"); }
+  function today(){ return new Date().toISOString().slice(0,10); }
+
+  // ---- init controls ----
+  $("threshold").value = state.threshold || 6000;
+  $("depFrom").value = state.depFrom || "";
+  $("depTo").value = state.depTo || "";
+  $("entryDate").value = today();
+
+  $("threshold").addEventListener("input", function(){
+    state.threshold = Number(this.value)||0; save(); render();
+  });
+  $("depFrom").addEventListener("change", function(){ state.depFrom=this.value; save(); });
+  $("depTo").addEventListener("change", function(){ state.depTo=this.value; save(); });
+
+  $("addBtn").addEventListener("click", function(){
+    var d = $("entryDate").value || today();
+    var p = Number($("entryPrice").value);
+    if(!p || p<=0){ $("entryPrice").focus(); return; }
+    state.entries.push({ date:d, price:p, note:($("entryNote").value||"").trim() });
+    state.entries.sort(function(a,b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+    $("entryPrice").value=""; $("entryNote").value="";
+    save(); render();
+  });
+
+  $("exportBtn").addEventListener("click", function(){
+    var blob = new Blob([JSON.stringify(state,null,2)], {type:"application/json"});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href=url; a.download="osl-pek-fares.json"; a.click();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 500);
+  });
+  $("importBtn").addEventListener("click", function(){ $("importFile").click(); });
+  $("importFile").addEventListener("change", function(e){
+    var f = e.target.files[0]; if(!f) return;
+    var r = new FileReader();
+    r.onload = function(){
+      try{
+        var obj = JSON.parse(r.result);
+        if(obj && Array.isArray(obj.entries)){
+          state = obj;
+          $("threshold").value = state.threshold||6000;
+          $("depFrom").value = state.depFrom||"";
+          $("depTo").value = state.depTo||"";
+          save(); render();
+        }
+      }catch(err){ alert("Could not read that file."); }
+    };
+    r.readAsText(f);
+  });
+
+  function removeEntry(i){ state.entries.splice(i,1); save(); render(); }
+
+  // ---- render ----
+  function render(){
+    var th = state.threshold||0;
+    var entries = state.entries.slice();
+
+    // hero = lowest logged fare
+    var fareEl=$("fare"), subEl=$("sub"), badgeEl=$("badge");
+    if(entries.length===0){
+      fareEl.className="fare none"; fareEl.innerHTML="— <span class='unit'></span>";
+      subEl.textContent="No fares logged yet";
+      badgeEl.style.display="none";
+    }else{
+      var lowest = entries.reduce(function(m,e){ return e.price<m.price?e:m; }, entries[0]);
+      var good = lowest.price < th;
+      fareEl.className = "fare " + (good?"good":"over");
+      fareEl.innerHTML = fmt(lowest.price) + " <span class='unit'>kr</span>";
+      subEl.textContent = "Lowest of " + entries.length + " · seen " + lowest.date + (lowest.note? " · "+lowest.note : "");
+      badgeEl.style.display="inline-block";
+      if(good){
+        badgeEl.className="badge good";
+        badgeEl.textContent = "Below target by " + fmt(th-lowest.price) + " kr";
+      }else{
+        badgeEl.className="badge over";
+        badgeEl.textContent = fmt(lowest.price-th) + " kr over target";
+      }
+    }
+
+    drawChart(entries, th);
+    drawLog(entries, th);
+  }
+
+  function drawLog(entries, th){
+    var ul=$("log"); ul.innerHTML="";
+    var rev = entries.slice().reverse();
+    if(rev.length===0){
+      var li=document.createElement("li");
+      li.innerHTML="<span class='n' style='color:var(--muted)'>Nothing logged yet.</span>";
+      ul.appendChild(li); return;
+    }
+    rev.forEach(function(e){
+      var idx = entries.indexOf(e);
+      var li=document.createElement("li");
+      var good = e.price < th;
+      li.innerHTML =
+        "<span class='d'>"+e.date+"</span>"+
+        "<span class='p "+(good?"good":"over")+"'>"+fmt(e.price)+"</span>"+
+        "<span class='n'>"+(e.note?escapeHtml(e.note):"")+"</span>"+
+        "<button class='del' aria-label='Remove'>✕</button>";
+      li.querySelector(".del").addEventListener("click", function(){ removeEntry(idx); });
+      ul.appendChild(li);
+    });
+  }
+
+  function escapeHtml(s){ return s.replace(/[&<>"']/g,function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+
+  // ---- hand-drawn flight-path chart ----
+  function drawChart(entries, th){
+    var svg=$("chart"), emptyEl=$("chartEmpty");
+    while(svg.firstChild) svg.removeChild(svg.firstChild);
+    if(entries.length===0){ emptyEl.style.display="block"; return; }
+    emptyEl.style.display="none";
+
+    var W=340,H=210, padL=44, padR=14, padT=16, padB=26;
+    var iw=W-padL-padR, ih=H-padT-padB;
+
+    var prices=entries.map(function(e){return e.price;});
+    var lo=Math.min.apply(null,prices.concat([th]));
+    var hi=Math.max.apply(null,prices.concat([th]));
+    var span=(hi-lo)||1; lo-=span*0.12; hi+=span*0.12; span=hi-lo;
+
+    var n=entries.length;
+    function X(i){ return padL + (n===1? iw/2 : iw*i/(n-1)); }
+    function Y(p){ return padT + ih*(1-(p-lo)/span); }
+
+    var NS="http://www.w3.org/2000/svg";
+    function el(name,attrs){ var e=document.createElementNS(NS,name);
+      for(var k in attrs) e.setAttribute(k,attrs[k]); return e; }
+
+    // deal zone (below threshold) shaded green
+    var yTh=Y(th);
+    svg.appendChild(el("rect",{x:padL,y:yTh,width:iw,height:(padT+ih)-yTh,
+      fill:"rgba(61,214,140,0.10)"}));
+    // threshold line (amber dashed)
+    svg.appendChild(el("line",{x1:padL,y1:yTh,x2:padL+iw,y2:yTh,
+      stroke:"#FFB300","stroke-width":1.4,"stroke-dasharray":"5 5"}));
+    var thLbl=el("text",{x:padL+iw,y:yTh-5,"text-anchor":"end",
+      fill:"#FFB300","font-size":"10","font-family":"var(--mono)"});
+    thLbl.textContent="target "+fmt(th);
+    svg.appendChild(thLbl);
+
+    // y-axis labels (lo/hi)
+    [hi,lo].forEach(function(v){
+      var t=el("text",{x:padL-8,y:Y(v)+3,"text-anchor":"end",
+        fill:"#8FA3BC","font-size":"9","font-family":"var(--mono)"});
+      t.textContent=fmt(v); svg.appendChild(t);
+    });
+
+    // price polyline
+    var dpts=entries.map(function(e,i){ return X(i)+","+Y(e.price); }).join(" ");
+    if(n>1){
+      svg.appendChild(el("polyline",{points:dpts,fill:"none",
+        stroke:"#FFB300","stroke-width":2,"stroke-linejoin":"round","stroke-linecap":"round"}));
+    }
+    // points
+    entries.forEach(function(e,i){
+      var good=e.price<th;
+      svg.appendChild(el("circle",{cx:X(i),cy:Y(e.price),r:good?4.5:3.5,
+        fill:good?"#3DD68C":"#0E1A2B",stroke:good?"#3DD68C":"#FFB300","stroke-width":2}));
+    });
+    // x-axis first/last date
+    [[0,entries[0].date,"start"],[n-1,entries[n-1].date,"end"]].forEach(function(d){
+      if(n===1 && d[2]==="end") return;
+      var t=el("text",{x:X(d[0]),y:H-8,
+        "text-anchor":d[2]==="start"?"start":"end",
+        fill:"#8FA3BC","font-size":"9","font-family":"var(--mono)"});
+      t.textContent=d[1].slice(5); svg.appendChild(t);
+    });
+  }
+
+  render();
+
+  // ---- PWA install prompt ----
+  var deferred=null;
+  window.addEventListener("beforeinstallprompt", function(e){
+    e.preventDefault(); deferred=e;
+    $("installbar").style.display="block";
+  });
+  $("installBtn").addEventListener("click", function(){
+    if(!deferred) return;
+    deferred.prompt();
+    deferred.userChoice.finally(function(){ deferred=null; $("installbar").style.display="none"; });
+  });
+
+  // ---- register service worker ----
+  if("serviceWorker" in navigator){
+    window.addEventListener("load", function(){
+      navigator.serviceWorker.register("sw.js").catch(function(){});
+    });
+  }
+})();
+</script>
+</body>
+</html>
