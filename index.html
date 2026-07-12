@@ -380,11 +380,44 @@
     offers.slice().sort(function(a,b){ return a.price-b.price; }).forEach(function(o){
       var good = o.price < target;
       var carrier = (o.carriers && o.carriers!=="-") ? o.carriers : "airline n/a";
+      var vendor  = (o.vendor && o.vendor!=="-") ? o.vendor : "";
       var li = document.createElement("li");
-      li.innerHTML =
-        "<span class='d'>"+(o.depart||"")+"→"+(o["return"]||"")+"</span>"+
-        "<span class='p "+(good?"good":"over")+"'>"+money(o.price)+"</span>"+
-        "<span class='n'>"+carrier+" · "+(o.stops!=null?o.stops:"?")+" stop</span>";
+      li.style.display = "block";          // stacked card, not one cramped row
+      li.style.padding = "12px 4px";
+
+      var head =
+        "<div style='display:flex;align-items:baseline;gap:10px'>"+
+          "<span class='p "+(good?"good":"over")+"' style='font-size:18px'>"+money(o.price)+" kr</span>"+
+          "<span class='n' style='flex:1'>"+carrier+" · "+(o.stops!=null?o.stops:"?")+" stop</span>"+
+        "</div>";
+
+      var times = "";
+      if(o.outbound_times || o.inbound_times){
+        times =
+          "<div class='sub' style='margin-top:4px;font-size:12px'>"+
+            (o.outbound_times ? "Out "+o.outbound_times : "")+
+            (o.inbound_times ? " &nbsp;·&nbsp; Back "+o.inbound_times : "")+
+          "</div>";
+      }
+
+      var meta =
+        "<div class='sub' style='margin-top:4px;font-size:12px'>"+
+          (vendor ? "via "+vendor : "")+
+          (o.quote_age_min!=null ? " &nbsp;·&nbsp; quote "+o.quote_age_min+" min old" : "")+
+        "</div>";
+
+      var linkHtml = "";
+      if(o.link){
+        linkHtml =
+          "<div style='margin-top:8px'>"+
+            "<a href='"+o.link+"' target='_blank' rel='noopener' "+
+            "style='color:var(--amber);text-decoration:none;font-size:13px;font-family:var(--mono)'>"+
+            "View / book \u2197</a>"+
+            "<span class='sub' style='font-size:11px'> (may redirect)</span>"+
+          "</div>";
+      }
+
+      li.innerHTML = head + times + meta + linkHtml;
       elLiveList.appendChild(li);
     });
   }
